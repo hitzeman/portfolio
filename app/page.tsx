@@ -6,6 +6,7 @@ import Timeline from "./_components/Timeline";
 import Portfolio from "./_components/Portfolio";
 import Contact from "./_components/Contact";
 import Footer from "./_components/Footer";
+import DigitalTwin from "./_components/DigitalTwin";
 
 export default function Home() {
   return (
@@ -20,6 +21,7 @@ export default function Home() {
         <Contact />
       </main>
       <Footer />
+      <DigitalTwin />
     </>
   );
 }
