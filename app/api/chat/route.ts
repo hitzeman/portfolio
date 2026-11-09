@@ -1,132 +1,111 @@
-import OpenAI from "openai";
+import { buildSystemPrompt } from "../../../lib/digital-twin/prompt";
 import {
-  profile,
-  skills,
-  timeline,
-  education,
-  certifications,
-} from "../../_data/profile";
+  MAX_BODY_BYTES,
+  chatRequestSchema,
+  formatIssues,
+  sanitizeMessages,
+} from "../../../lib/digital-twin/messages";
+import {
+  MAX_COMPLETION_TOKENS,
+  MODEL,
+  UPSTREAM_TIMEOUT_MS,
+  classifyUpstreamError,
+  getOpenAIClient,
+  isConfigured,
+} from "../../../lib/digital-twin/upstream";
+import { chatLimiter } from "../../../lib/digital-twin/limiter";
+import { clientKeyFromHeaders } from "../../../lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MODEL = "gpt-5.4-mini";
-const MAX_USER_TURNS = 12;
-const MAX_USER_CHARS = 2000;
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-function buildSystemPrompt(): string {
-  const skillsBlock = Object.entries(skills)
-    .map(([k, v]) => `- ${k}: ${v.join(", ")}`)
-    .join("\n");
-
-  const timelineBlock = timeline
-    .map((t) => {
-      const header = `${t.role} @ ${t.company} (${t.period}, ${t.location})`;
-      const bullets = t.highlights.map((h) => `  • ${h}`).join("\n");
-      return `${header}\n${bullets}`;
-    })
-    .join("\n\n");
-
-  const eduBlock = education
-    .map((e) => `- ${e.degree}, ${e.school}`)
-    .join("\n");
-
-  const certsBlock = certifications.map((c) => `- ${c}`).join("\n");
-
-  return `You are Todd Hitzeman's "Digital Twin" — an AI presence on Todd's personal portfolio site. You speak as Todd, in first person ("I"), in a confident, warm, professional tone. You are not a generic assistant; you are a representation of Todd answering visitors' questions about his career, skills, and experience.
-
-# Who I am
-${profile.name} — ${profile.title}.
-Based in ${profile.location}. ${profile.status}.
-${profile.about.join("\n\n")}
-
-# Skills
-${skillsBlock}
-
-# Career
-${timelineBlock}
-
-# Education
-${eduBlock}
-
-# Certifications
-${certsBlock}
-
-# Contact
-Email: ${profile.email}
-LinkedIn: ${profile.linkedin}
-
-# How I respond
-- Speak as Todd in first person. Never break character or say "as an AI".
-- Keep answers tight and conversational — 2–4 short paragraphs unless the question genuinely needs more depth. Avoid huge bulleted lists; prose feels human.
-- Ground every answer in the facts above. If asked about something not covered (specific projects under NDA, current salary, exact metrics I haven't shared, etc.), say so honestly — something like "I haven't shared the specifics publicly, but I'd be happy to walk through it on a call."
-- For technical questions, lean into my actual experience (Angular SSR/SSG, shared component libraries, .NET, Azure, A/B testing) rather than generic best practices.
-- If asked about availability, hiring, or "are you looking" — say I'm open to senior frontend / full-stack roles and nudge them toward the contact section or email.
-- Don't invent companies, dates, technologies, or accomplishments not in the data above. If unsure, defer.
-- Don't discuss other people, politics, or anything off-topic. Steer back to the work.
-- Format: plain text, no markdown headers, minimal emoji (only if it genuinely fits). Short paragraphs separated by blank lines are great.`;
-}
-
-type ClientMessage = {
-  role: "user" | "assistant";
-  content: string;
+type ErrorBody = {
+  error: { code: string; message: string; details?: string[] };
 };
 
+function errorResponse(
+  status: number,
+  code: string,
+  message: string,
+  extra?: { details?: string[]; headers?: Record<string, string> }
+) {
+  const body: ErrorBody = { error: { code, message } };
+  if (extra?.details) body.error.details = extra.details;
+  return Response.json(body, { status, headers: extra?.headers });
+}
+
 export async function POST(req: Request) {
-  if (!process.env.OPENAI_API_KEY) {
-    return Response.json(
-      { error: "Server missing OPENAI_API_KEY." },
-      { status: 500 }
+  if (!isConfigured()) {
+    return errorResponse(
+      503,
+      "not_configured",
+      "The digital twin is not configured on this server."
     );
   }
 
-  let body: { messages?: ClientMessage[] };
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body." }, { status: 400 });
+  const key = clientKeyFromHeaders(req.headers);
+  const decision = chatLimiter.check(key);
+  if (!decision.allowed) {
+    return errorResponse(
+      429,
+      "rate_limited",
+      "Too many messages. Please wait a moment and try again.",
+      { headers: { "Retry-After": String(decision.retryAfterSeconds) } }
+    );
   }
 
-  const incoming = Array.isArray(body.messages) ? body.messages : [];
-  const sanitized = incoming
-    .filter(
-      (m) =>
-        m &&
-        (m.role === "user" || m.role === "assistant") &&
-        typeof m.content === "string" &&
-        m.content.trim().length > 0
-    )
-    .slice(-MAX_USER_TURNS)
-    .map((m) => ({
-      role: m.role,
-      content: m.content.slice(0, MAX_USER_CHARS),
-    }));
+  const declared = Number(req.headers.get("content-length") ?? 0);
+  if (declared > MAX_BODY_BYTES) {
+    return errorResponse(413, "payload_too_large", "Request body is too large.");
+  }
 
-  if (sanitized.length === 0 || sanitized[sanitized.length - 1].role !== "user") {
-    return Response.json(
-      { error: "Last message must be from the user." },
-      { status: 400 }
+  let raw: unknown;
+  try {
+    const text = await req.text();
+    if (text.length > MAX_BODY_BYTES) {
+      return errorResponse(413, "payload_too_large", "Request body is too large.");
+    }
+    raw = JSON.parse(text);
+  } catch {
+    return errorResponse(400, "invalid_json", "Request body must be valid JSON.");
+  }
+
+  const parsed = chatRequestSchema.safeParse(raw);
+  if (!parsed.success) {
+    return errorResponse(400, "invalid_request", "Request did not match the schema.", {
+      details: formatIssues(parsed.error),
+    });
+  }
+
+  const sanitized = sanitizeMessages(parsed.data.messages);
+  if (!sanitized.ok) {
+    return errorResponse(
+      400,
+      "invalid_request",
+      sanitized.reason === "empty"
+        ? "At least one non-empty message is required."
+        : "The last message must come from the user."
     );
   }
 
   const encoder = new TextEncoder();
+  const abort = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
 
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const completion = await client.chat.completions.create({
-          model: MODEL,
-          stream: true,
-          max_completion_tokens: 800,
-          messages: [
-            { role: "system", content: buildSystemPrompt() },
-            ...sanitized,
-          ],
-        });
+        const completion = await getOpenAIClient().chat.completions.create(
+          {
+            model: MODEL,
+            stream: true,
+            max_completion_tokens: MAX_COMPLETION_TOKENS,
+            messages: [
+              { role: "system", content: buildSystemPrompt() },
+              ...sanitized.messages,
+            ],
+          },
+          { signal: abort }
+        );
 
         for await (const chunk of completion) {
           const delta = chunk.choices?.[0]?.delta?.content;
@@ -134,12 +113,13 @@ export async function POST(req: Request) {
         }
         controller.close();
       } catch (err) {
-        const msg =
-          err instanceof Error ? err.message : "Unexpected error talking to the model.";
-        console.error("[/api/chat] OpenAI error:", err);
-        controller.enqueue(
-          encoder.encode(`\n\n[error] ${msg}`)
-        );
+        const classified = classifyUpstreamError(err);
+        console.error("[/api/chat] upstream failure", {
+          code: classified.code,
+          status: classified.status,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        controller.enqueue(encoder.encode(`\n\n[error] ${classified.message}`));
         controller.close();
       }
     },
@@ -150,6 +130,7 @@ export async function POST(req: Request) {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-store",
       "X-Accel-Buffering": "no",
+      "X-RateLimit-Remaining": String(decision.remaining),
     },
   });
 }

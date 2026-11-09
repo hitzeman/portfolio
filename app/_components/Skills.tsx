@@ -2,10 +2,14 @@ import { skills } from "../_data/profile";
 import Reveal from "./Reveal";
 import SectionLabel from "./SectionLabel";
 
-const categoryMeta: Record<
-  string,
-  { num: string; tint: string; description: string }
-> = {
+type CategoryMeta = {
+  num: string;
+  tint: string;
+  description: string;
+  label?: string;
+};
+
+const categoryMeta: Record<string, CategoryMeta> = {
   Frontend: {
     num: "01",
     tint: "var(--accent)",
@@ -21,12 +25,25 @@ const categoryMeta: Record<
     tint: "var(--accent-3)",
     description: "Shipping and operating apps in Azure with disciplined CI/CD and observability.",
   },
-  Practice: {
+  AIEngineering: {
     num: "04",
+    label: "AI Engineering",
+    tint: "var(--accent-2)",
+    description: "Making AI-assisted engineering repeatable: grounded agent context, explicit constraints, and verifiable results.",
+  },
+  Practice: {
+    num: "05",
     tint: "var(--accent)",
     description: "How I work: mentor, reviewer, experimenter — quality is a system, not a step.",
   },
 };
+
+const fallbackMeta = (category: string, index: number): CategoryMeta => ({
+  num: String(index + 1).padStart(2, "0"),
+  tint: "var(--accent)",
+  description: "",
+  label: category,
+});
 
 export default function Skills() {
   const allTags = Object.values(skills).flat();
@@ -54,7 +71,7 @@ export default function Skills() {
 
         <div className="grid md:grid-cols-2 gap-5">
           {Object.entries(skills).map(([category, items], i) => {
-            const meta = categoryMeta[category];
+            const meta = categoryMeta[category] ?? fallbackMeta(category, i);
             return (
               <Reveal key={category} delay={i * 90}>
                 <div className="group h-full glass rounded-2xl p-7 relative overflow-hidden transition-colors hover:border-[var(--border-strong)]">
@@ -70,7 +87,7 @@ export default function Skills() {
                         {meta.num} / Discipline
                       </div>
                       <h3 className="mt-1.5 text-2xl md:text-3xl font-medium tracking-tight">
-                        {category}
+                        {meta.label ?? category}
                       </h3>
                     </div>
                     <span

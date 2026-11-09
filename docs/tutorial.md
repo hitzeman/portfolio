@@ -1,3 +1,5 @@
+> **Note (November 2026):** this tutorial describes the site as originally built in May 2026. It predates the hardened chat route, the MCP server, and the agent harness. See the root `README.md` and `HARNESS.md` for the current state.
+
 # Building a Modern Portfolio Site with AI Chat: A Beginner's Tutorial
 
 > A walk-through of everything that was built in this project — the file structure, the technology choices, and how each piece of code actually works. Written for someone brand new to frontend development.

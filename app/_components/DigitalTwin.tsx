@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { MAX_MESSAGE_CHARS, MAX_TURNS } from "../../lib/digital-twin/constants";
 
 type Message = {
   id: string;
@@ -97,6 +98,7 @@ export default function DigitalTwin() {
           body: JSON.stringify({
             messages: next
               .filter((m) => m.id !== assistantId && m.id !== "greeting")
+              .slice(-MAX_TURNS)
               .map((m) => ({ role: m.role, content: m.content })),
           }),
           signal: controller.signal,
@@ -317,6 +319,7 @@ export default function DigitalTwin() {
           >
             <div className="relative flex items-end gap-2 rounded-xl border border-[var(--border-strong)] bg-bg p-2 focus-within:border-[var(--accent)]/60 transition-colors">
               <textarea
+                maxLength={MAX_MESSAGE_CHARS}
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
