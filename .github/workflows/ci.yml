@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: lint · typecheck · test · audit · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Dependency audit (high and above)
+        run: npm audit --audit-level=high
+
+      - name: Build site
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: MCP server boots over stdio
+        shell: bash
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            | timeout 30 npx tsx mcp/stdio.ts 2>/dev/null \
+            | node -e '
+              let s = "";
+              process.stdin.on("data", d => s += d).on("end", () => {
+                const lines = s.trim().split("\n").map(l => { try { return JSON.parse(l); } catch { return null; } });
+                const list = lines.find(j => j && j.id === 2);
+                if (!list || !list.result || !list.result.tools || list.result.tools.length === 0) {
+                  console.error("tools/list did not return tools:", s);
+                  process.exit(1);
+                }
+                console.log("tools:", list.result.tools.map(t => t.name).join(", "));
+              });
+            '
