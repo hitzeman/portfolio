@@ -1,5 +1,4 @@
 import Reveal from "./Reveal";
-import SectionLabel from "./SectionLabel";
 
 const cards = [
   {

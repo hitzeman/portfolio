@@ -5,23 +5,39 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify": "node scripts/verify.mjs",
+    "mcp": "tsx mcp/server.ts"
   },
   "dependencies": {
-    "eslint-config-next": "^16.4.5",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "framer-motion": "^12.40.0",
     "lucide-react": "^1.16.0",
     "next": "^16.4.5",
     "openai": "^6.39.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^24.19.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "eslint": "^10.14.0",
+    "eslint-config-next": "^16.4.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^5.1.0"
+  },
+  "description": "Personal portfolio site with an AI digital twin, plus an MCP server exposing the same profile data to agents.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.11"
   }
 }
