@@ -18,14 +18,15 @@ const args = new Set(process.argv.slice(2));
 const hookMode = args.has("--hook");
 const quick = args.has("--quick");
 
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-
 function run(label, cmdArgs) {
   const started = Date.now();
-  const res = spawnSync(npm, cmdArgs, {
+  // One constant command string through the shell: works for npm.cmd on
+  // Windows and plain npm elsewhere, and avoids Node's DEP0190 warning
+  // about args + shell. Nothing here comes from user input.
+  const res = spawnSync(["npm", ...cmdArgs].join(" "), {
     stdio: hookMode ? "pipe" : "inherit",
     encoding: "utf8",
-    shell: process.platform === "win32",
+    shell: true,
   });
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   if (res.status === 0) {
